@@ -10,12 +10,12 @@
     # load all required files
     $whmcsdir = dirname(__FILE__) . '/../../../';
 
-    require_once $whmcsdir . 'dbconnect.php';
-    require_once $whmcsdir . '/includes/functions.php';
+    //require_once $whmcsdir . 'dbconnect.php';
+    //require_once $whmcsdir . '/includes/functions.php';
     // Looking for WHMCS 5.2 compatability? Comment the above two lines with
     // "//" and then uncomment the line below:
     //
-    // require_once $whmcsdir . 'init.php';
+    require_once $whmcsdir . 'init.php';
 
     require_once $whmcsdir . '/includes/gatewayfunctions.php';
     require_once $whmcsdir . '/includes/invoicefunctions.php';
@@ -58,7 +58,8 @@
                 # delete related preauths
                 foreach ($val['pre_authorizations'] as $aPreauth) {
                     # find preauth in tblhosting and empty out the subscriptionid field
-                    update_query('tblhosting',array('subscriptionid' => ''),array('subscriptionid'    => $aPreauth['id']));
+	                // CCF: use our new custom preauth table instead
+                    update_query('mod_gocardless_client_preauth',array('active' => '0'),array('preauth_id'    => $aPreauth['id']));
                     # log each preauth that has been cancelled
                     logTransaction($gateway['paymentmethod'],'GoCardless Preauthorisation Cancelled ('.$aPreauth['id'].')','Cancelled');
                 }

@@ -11,12 +11,12 @@
     # load all required files
     $whmcsdir = dirname(__FILE__) . '/../../../';
 
-    require_once $whmcsdir . 'dbconnect.php';
-    require_once $whmcsdir . '/includes/functions.php';
+    //require_once $whmcsdir . 'dbconnect.php';
+    //require_once $whmcsdir . '/includes/functions.php';
     // Looking for WHMCS 5.2 compatability? Comment the above two lines with
     // "//" and then uncomment the line below:
     //
-    // require_once $whmcsdir . 'init.php';
+    require_once $whmcsdir . 'init.php';
 
     require_once $whmcsdir . '/includes/gatewayfunctions.php';
     require_once $whmcsdir . '/includes/invoicefunctions.php';
@@ -49,14 +49,14 @@
             # failed to verify the resource with GoCardless. Log transaction and ouput error message to client
             logTransaction($gateway['paymentmethod'],'GoCardless Redirect Failed (Resource not verified) : ' .print_r($_GET,true) . 'Exception: ' . print_r($e,true),'Unsuccessful');
             header('HTTP/1.1 400 Bad Request');
-            exit('Your request could not be completed');
+            exit('Your request could not be completed, please contact support');
         }
 
     } else {
         # failed to get resource ID and resource type, invalid request. Log transaction and ouput error message to client
         logTransaction($gateway['paymentmethod'],'GoCardless Redirect Failed (No data provided) : ' .print_r($_GET,true),'Unsuccessful');
         header('HTTP/1.1 400 Bad Request');
-        exit('Your request could not be completed');
+        exit('Your request could not be completed, please contact support');
     }
 
     # split invoice data into invoiceID and invoiceAmount
@@ -105,12 +105,12 @@
                 $amount_to_charge = $invoiceAmount - $setup_amount;
                 $oBill = $pre_auth->create_bill(array(
                     'amount' => $amount_to_charge,
-                    'name' => "Invoice #" . $invoiceID
+                    'name' => "Invoice number " . $invoiceID
                 ));
             } catch (Exception $e) {
                 # log that we havent been able to create the bill and exit out
                 logTransaction($gateway['paymentmethod'],'Failed to create new bill: ' . print_r($e,true),'GoCardless Error');
-                exit('Your request could not be completed');
+                exit('Your request could not be completed, please contact support');
             }
 
 			try {
@@ -138,13 +138,32 @@
 
             # query tblinvoiceitems to get the related service ID
             # update subscription ID with the resource ID on all hosting services corresponding with the invoice
-            $d = select_query('tblinvoiceitems', 'relid', array('type' => 'Hosting', 'invoiceid' => $invoiceID));
-            while ($res = mysql_fetch_assoc($d)) {
-                update_query('tblhosting', array('subscriptionid' => $pre_auth->id), array('id' => $res['relid']));
-            }
+//            $d = select_query('tblinvoiceitems', 'relid', array('type' => 'Hosting', 'invoiceid' => $invoiceID));
+//            while ($res = mysql_fetch_assoc($d)) {
+//                update_query('tblhosting', array('subscriptionid' => $pre_auth->id), array('id' => $res['relid']));
+//            }
+//            # clean up
+//            unset($d,$res);
 
-            # clean up
-            unset($d,$res);
+            // CCF: the above shouldn't be necessary, but to be sure we'll set the preauth_id in our new table
+			$pa_query = select_query('mod_gocardless_client_preauth', 'preauth_id', array('client_id' => $userID));
+			if (mysql_num_rows($pa_query))
+			{
+				// the preauth for this user exists, let's check it matches
+				$pa_result = mysql_fetch_array($pa_query);
+				$db_pa = $pa_result['preauth_id'];
+				if (!$db_pa == $pre_auth->id)
+				{
+					// CCF: it doesn't match so let's update it to the one returned from GC
+					update_query('mod_gocardless_client_preauth', array('preauth_id' => $pre_auth->id, 'active' => 1), array('client_id' => $userID));
+				}
+			}
+			else
+			{
+				// CCF: the preauth doesn't exist so insert the new one
+				insert_query('mod_gocardless_client_preauth', array('preauth_id' => $pre_auth->id, 'client_id' => $userID, 'active' => 1));
+			}
+
             break;
 
             case 'bill':
@@ -156,7 +175,7 @@
             default:
                 # we cannot handle anything other than a bill or preauths
                 header('HTTP/1.1 400 Bad Request');
-                exit('Your request could not be completed');
+                exit('Your request could not be completed, please contact support');
                 break;
         }
 
@@ -204,8 +223,62 @@
         header("Location: {$systemURL}/viewinvoice.php?id={$invoiceID}");
         exit();
 
-    } else {
-        # we could not get an invoiceID so cannot process this further
-        header('HTTP/1.1 400 Bad Request');
-        exit('Your request could not be completed');
-}
+    } else
+    {
+		//CCF: there's no invoice id, but we could be just catching a preauth
+
+	    if ($_GET['resource_type'] == 'pre_authorization')
+	    {
+	        # get the confirmed resource (pre_auth) and create a referenced param $pre_auth
+	        $pre_auth = &$confirmed_resource;
+
+		    // userID will not be set if no invoice ID has been found, so let's grab it from the session
+		    $userID =  !isset($userID) ? $_SESSION['uid'] : $userID;
+		    $pa_query = select_query('mod_gocardless_client_preauth', 'preauth_id', array('client_id' => $userID));
+		    if (mysql_num_rows($pa_query))
+		    {
+			    // the preauth for this user exists, let's check it matches
+			    $pa_result = mysql_fetch_array($pa_query);
+			    $db_pa = $pa_result['preauth_id'];
+				update_query('mod_gocardless_client_preauth', array('preauth_id' => $pre_auth->id, 'active' => 1), array('client_id' => $userID));
+		    }
+		    else
+		    {
+			    // CCF: the preauth doesn't exist so insert the new one
+			    insert_query('mod_gocardless_client_preauth', array('preauth_id' => $pre_auth->id, 'client_id' => $userID, 'active' => 1));
+		    }
+
+		    $success = 0;
+		    //CCF: check the db preauth against the returned preauth again to see if it succeeded
+		    $check_query = select_query('mod_gocardless_client_preauth', 'preauth_id', array('client_id' => $userID, 'active' => 1));
+		    if (mysql_num_rows($check_query))
+		    {
+			    // the preauth for this user exists, let's check it matches
+			    $check_result = mysql_fetch_array($check_query);
+			    $check_db_pa = $check_result['preauth_id'];
+			    $success = $check_db_pa == $pre_auth->id ? 1 : 0;
+
+			    // get user ID and gateway ID for use further down the script
+			    $gatewayID = mysql_result(select_query('tblclients', 'gatewayid', array('id' => $userID)),0,0);
+
+			    // if the user records gateway is blank, set it to gocardless
+			    if (empty($gatewayID)) {
+				    update_query('tblclients', array('gatewayid' => $gateway['paymentmethod']), array('id' => $userID));
+			    }
+		    }
+
+		    // if the preauth was successful, the page we're going to will show it configured
+		    $systemURL = ($CONFIG['SystemSSLURL'] ? $CONFIG['SystemSSLURL'] : $CONFIG['SystemURL']);
+		    header('HTTP/1.1 303 See Other');
+		    header("Location: {$systemURL}/?m=gc_preauth&success={$success}");
+		    exit();
+
+	    }
+	    else
+	    {
+		    # we could not get an invoiceID or a preauth so cannot process this further
+		    header('HTTP/1.1 400 Bad Request');
+		    exit('Your request could not be completed, please contact support');
+	    }
+
+	}

@@ -183,9 +183,10 @@
         $recurringcycleunit = strtolower(substr($aRecurrings['recurringcycleunits'],0,-1));
 
         # check a number of conditions to see if it is possible to setup a preauth
-        if(($params['oneoffonly'] == 'on') ||
-            ($aRecurrings === false) ||
-            ($aRecurrings['recurringamount'] <= 0)) {
+//        if(($params['oneoffonly'] == 'on') || ($aRecurrings === false) || ($aRecurrings['recurringamount'] <= 0))
+	    // CCF: always create a preauth regardless of recurring bills, unless expressly turned off in admin
+        if(($params['oneoffonly'] == 'on'))
+        {
             $noPreauth = true;
         } else {
             $noPreauth = false;
@@ -206,16 +207,28 @@
             'billing_postcode'  => $params['clientdetails']['postcode'],
         );
 
-        $invoice_item_query = select_query('tblinvoiceitems', 'relid', array('invoiceid' => $params['invoiceid'], 'type' => 'Hosting'));
+//        $invoice_item_query = select_query('tblinvoiceitems', 'relid', array('invoiceid' => $params['invoiceid'], 'type' => 'Hosting'));
+//
+//        while ($invoice_item = mysql_fetch_assoc($invoice_item_query)) {
+//            $package_query = select_query('tblhosting', 'subscriptionid', array('id' => $invoice_item['relid']));
+//            $package = mysql_fetch_assoc($package_query);
+//
+//            if (!empty($package['subscriptionid'])) {
+//                $preauthExists = true;
+//            }
+//        }
 
-        while ($invoice_item = mysql_fetch_assoc($invoice_item_query)) {
-            $package_query = select_query('tblhosting', 'subscriptionid', array('id' => $invoice_item['relid']));
-            $package = mysql_fetch_assoc($package_query);
-
-            if (!empty($package['subscriptionid'])) {
-                $preauthExists = true;
-            }
-        }
+	    // CCF: check in our new client-preath table for a preauth
+	    $preauth_query = select_query('mod_gocardless_client_preauth','preauth_id', array('client_id' => $params['clientdetails']['id']));
+	    // check for a preauth:
+	    if(mysql_num_rows($preauth_query))
+	    {
+		    $preauthExists = true;
+	    }
+	    else
+	    {
+		    $preauthExists = false;
+	    }
 
         if ($preauthExists) {
             # The customer already has a pre-auth, but it's yet to be charged so
@@ -226,7 +239,7 @@
             # if one of the $noPreauth conditions have been met, display a one time payment button
             # we are making a one off payment, display the appropriate code
             # Button title
-            $title = 'Pay Now with GoCardless';
+            $title = 'Pay Now by Direct Debit';
 
             # create GoCardless one off payment URL using the GoCardless library
             $url = GoCardless::new_bill_url(array(
@@ -239,7 +252,8 @@
             # return one time payment button code
               $sButton = (GoCardless::$environment == 'sandbox' ? '<strong style="color: #FF0000; font-size: 16px;">SANDBOX MODE</strong><br />' : null) . '<a href="'.$url.'" onclick="window.location=\''.$url.'\';" style="text-decoration: none"><input onclick="window.location=\''.$url.'\';" type="button" value="'.$title.'" /></a>';
 
-        } else {
+        }
+        else {
             # we are setting up a preauth (description friendly name), display the appropriate code
 
             # get the invoice from the database because we need the invoice creation date
@@ -252,10 +266,10 @@
                 $aRecurrings['recurringcycleperiod'] = ($aRecurrings['recurringcycleperiod']*12);
             }
 
-            $pre_auth_maximum = 5000; # Always create a £5000 pre-auth
+            $pre_auth_maximum = 5000; // CCF: Always create a £5000 pre-auth (and we can take it every day if we really want to
 
             # Button title
-            $title = 'Create Subscription with GoCardless';
+            $title = 'Create Direct Debit Subscription';
 
             # create GoCardless preauth URL using the GoCardless library
             $url = GoCardless::new_pre_authorization_url(array(
@@ -263,9 +277,10 @@
                     # set the setup fee as the first payment amount - recurring amount
                     'setup_fee' => ($aRecurrings['firstpaymentamount'] > $aRecurrings['recurringamount']) ? ($aRecurrings['firstpaymentamount']-$aRecurrings['recurringamount']) : 0,
                     'name' => "Direct Debit payments to " . $CONFIG['CompanyName'],
-                    'interval_length' => $aRecurrings['recurringcycleperiod'],
+	                // CCF: override the length and period to allow payments every day
+                    'interval_length' => 1,
                     # convert $aRecurrings['recurringcycleunits'] to valid value e.g. day,month,year
-                    'interval_unit' => $recurringcycleunit,
+                    'interval_unit' => 'day',
                     # set the start date to the creation date of the invoice - 2 days
                     'start_at' => date_format(date_create($aInvoice['date'].' -2 days'),'Y-m-d\TH:i:sO'),
                     'user' => $aUser,
@@ -273,7 +288,7 @@
                 ));
 
             # return the recurring preauth button code
-            $sButton =  (GoCardless::$environment == 'sandbox' ? '<strong style="color: #FF0000; font-size: 16px;">SANDBOX MODE</strong><br />' : null) . 'When you get to GoCardless you will see an agreement for the <b>maximum possible amount</b> we\'ll ever need to charge you in a single invoice for this order, with a frequency of the shortest item\'s billing cycle. But rest assured we will never charge you more than the actual amount due.
+            $sButton =  (GoCardless::$environment == 'sandbox' ? '<strong style="color: #FF0000; font-size: 16px;">SANDBOX MODE</strong><br />' : null) . 'We have partnered with GoCardless to enable flexible Direct Debit payment options to you. Click the button below to create the DD Subscription.
             <br /><a onclick="window.location=\''.$url.'\';" href="'.$url.'" style="text-decoration: none"><input type="button" onclick="window.location=\''.$url.'\';" value="'.$title.'" /></a>';
 
         }
@@ -310,18 +325,30 @@
         if (!mysql_num_rows($existing_payment_query) || empty($existing_payment['resource_id'])) {
 
             # query the database to get the relid of all invoice items
-            $invoice_item_query = select_query('tblinvoiceitems', 'relid', array('invoiceid' => $params['invoiceid'], 'type' => 'Hosting'));
+//            $invoice_item_query = select_query('tblinvoiceitems', 'relid', array('invoiceid' => $params['invoiceid'], 'type' => 'Hosting'));
+	        // CCF: modded by Chris to include all invoice item types (not just hosting items)
+//            $invoice_item_query = select_query('tblinvoiceitems', 'relid', array('invoiceid' => $params['invoiceid']));
 
             # loop through each returned (each invoice item) and attempt to find a subscription ID
-            while ($invoice_item = mysql_fetch_assoc($invoice_item_query)) {
-                $package_query = select_query('tblhosting', 'subscriptionid', array('id' => $invoice_item['relid']));
-                $package = mysql_fetch_assoc($package_query);
+//            while ($invoice_item = mysql_fetch_assoc($invoice_item_query)) {
+//                $package_query = select_query('tblhosting', 'subscriptionid', array('id' => $invoice_item['relid']));
+//                $package = mysql_fetch_assoc($package_query);
+//
+//                # if we have found a subscriptionID, store it in $preauthid
+//                if (!empty($package['subscriptionid'])) {
+//                    $preauthid = $package['subscriptionid'];
+//                }
+//            }
 
-                # if we have found a subscriptionID, store it in $preauthid
-                if (!empty($package['subscriptionid'])) {
-                    $preauthid = $package['subscriptionid'];
-                }
-            }
+	        // CCF: instead of using the subscription ID from a hosting plan, use the preauth from the new preauth table
+	        $preauth_query = select_query('mod_gocardless_client_preauth','preauth_id', array('active' => 1, 'client_id' => $params['clientdetails']['id']));
+	        // check for a preauth:
+	        if(mysql_num_rows($preauth_query))
+	        {
+		        $preAuthResult = mysql_fetch_assoc($preauth_query);
+		        $preauthid = $preAuthResult['preauth_id'];
+	        }
+
 
             # now we are out of the loop, check if we have been able to get the PreAuth ID
             if (isset($preauthid)) {
@@ -337,7 +364,7 @@
                     try {
                         $bill = $pre_auth->create_bill(array(
                             'amount' => $params['amount'],
-                            'name' => "Invoice #" . $params['invoiceid']
+                            'name' => "Invoice number " . $params['invoiceid']
                         ));
                     } catch (Exception $e) {
                         # we failed to create a new bill, lets update mod_gocardless to alert the admin why payment hasnt been received,
@@ -386,7 +413,7 @@
                 # the client will have to setup a new preauth to begin recurring payments again
                 # or pay using an alternative method
                 logTransaction($gateway['paymentmethod'], 'No pre-authorization found when trying to raise payment for invoice ' . $params['invoiceid'] . ' - something has gone wrong, or the customer needs to set up their Direct Debit again.', 'Incomplete');
-                return array('status' => 'error', 'rawdata' => array('message' => 'No pre-authorisation ID found in WHMCS for invoice ' . $params['invoiceid']));
+                return array('status' => 'error', 'rawdata' => array('message' => 'No pre-authorisation ID found for invoice ' . $params['invoiceid']));
             }
 
         } else {
@@ -441,6 +468,20 @@
 
             full_query($query);
         }
+	    if(mysql_num_rows(full_query("SHOW TABLES LIKE 'mod_gocardless_client_preauth'"))) {
+	    } else {
+		    # create the table if it doesn't exist
+		    $query = "CREATE TABLE IF NOT EXISTS `mod_gocardless_client_preauth` (
+            `id` int(11) NOT NULL auto_increment,
+            `client_id` int(11) NOT NULL,
+            `preauth_id` varchar(16) default NULL,
+            `active` tinyint(1) NOT NULL default '1',
+            PRIMARY KEY  (`id`),
+            UNIQUE KEY `client_id` (`client_id`),
+            UNIQUE KEY `preauth_id` (`preauth_id`))";
+
+		    full_query($query);
+	    }
     }
 
     /**
