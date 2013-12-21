@@ -1,4 +1,25 @@
+
+
 ![GoCardless](https://s3-eu-west-1.amazonaws.com/gocardless-logos/lo-res.jpg)
+
+# Extended functionality
+
+## All invoice types
+
+__Now allows payment of all invoice types.__
+The original module stored preauth ID against the client subsciption ID field and it was used only for 
+invoices that were raised in relation to hosting services.
+
+PreAuthIDs are now stored in a new dedicated table, allowing all invoice types to be charge via GoCardless.
+
+## Preauthorisation via the new addon
+
+__Now allows clients to set up the preauth without an invoice being due__
+The original module would only allow the preauthorisation to be created at the point of making a payment 
+against the first invoice.
+
+By visiting whmcs_url/?m=gc_preauth clients can set up their own preauthorisation without waiting until 
+an invoice has been raised.
 
 # Announcement
 
