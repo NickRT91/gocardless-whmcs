@@ -110,7 +110,7 @@
                         # if we get to this point, we have verified the callback and performed sanity checks
                         # add a payment to the invoice and create a transaction log
 
-                        if ($gateway['instantpaid'] == 'off') {
+                        if ($gateway['instantpaid'] == '' || $gateway['instantpaid'] == false) {
                             # No invoice payment will have been recorded yet, so now we'll record it
                             addInvoicePayment($invoiceID, $aBill['id'], $aBill['amount'], $aBill['fees'], $gateway['paymentmethod']);
                         }
